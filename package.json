@@ -1,0 +1,29 @@
+{
+  "name": "ply",
+  "version": "0.1.0",
+  "description": "Knoply: MCP-based microservice onboarding orchestrator",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "dev": "tsx src/cli.ts",
+    "test:hybrid": "tsx src/testScanner.ts",
+    "start:server": "node dist/server.js",
+    "test:mcp": "tsx src/testMcp.ts",
+    "triage": "tsx src/triage.ts",
+    "test:resolution": "tsx src/testResolution.ts",
+    "test:finalization": "tsx src/testFinalization.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.1",
+    "typescript": "^5.3.3"
+  }
+}

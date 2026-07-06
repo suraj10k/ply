@@ -1,0 +1,173 @@
+import * as fs from 'fs/promises';
+import * as path from 'path';
+// Folders we should always ignore during recursive scanning
+const IGNORED_DIRECTORIES = new Set([
+    'node_modules',
+    '.git',
+    '.knowledge',
+    'dist',
+    'build',
+    'coverage',
+    '.next',
+    '.output'
+]);
+// Categories of candidate files we look for
+const CANDIDATE_PATTERNS = {
+    apis: /(route|controller|api|endpoint|handler)/i,
+    data: /(db|database|schema|model|connection|driver)/i,
+    architecture: /(app|server|index|main|config|setup)/i,
+    operations: /(log|logger|metric|monitor|opentelemetry)/i
+};
+/**
+ * Recursively scans a directory for files, applying ignore rules.
+ */
+async function walkDirectory(dir, baseDir) {
+    const files = [];
+    let entries;
+    try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+    }
+    catch (err) {
+        return [];
+    }
+    for (const entry of entries) {
+        const resPath = path.join(dir, entry.name);
+        const relPath = path.relative(baseDir, resPath);
+        if (entry.isDirectory()) {
+            if (IGNORED_DIRECTORIES.has(entry.name)) {
+                continue;
+            }
+            files.push(...(await walkDirectory(resPath, baseDir)));
+        }
+        else if (entry.isFile()) {
+            files.push(relPath);
+        }
+    }
+    return files;
+}
+/**
+ * Scan package.json for libraries to determine frameworks and databases
+ */
+async function extractDependencies(repoPath) {
+    const packageJsonPath = path.join(repoPath, 'package.json');
+    let dependencies = {};
+    let devDependencies = {};
+    try {
+        const content = await fs.readFile(packageJsonPath, 'utf-8');
+        const pkg = JSON.parse(content);
+        dependencies = pkg.dependencies || {};
+        devDependencies = pkg.devDependencies || {};
+    }
+    catch (err) {
+        // If package.json doesn't exist, we return empty dependencies
+    }
+    const allDeps = { ...dependencies, ...devDependencies };
+    // Framework detection rules
+    let framework = 'unknown';
+    if (allDeps['express'])
+        framework = 'Express';
+    else if (allDeps['koa'])
+        framework = 'Koa';
+    else if (allDeps['fastify'])
+        framework = 'Fastify';
+    else if (allDeps['@nestjs/core'])
+        framework = 'NestJS';
+    else if (allDeps['next'])
+        framework = 'Next.js';
+    // DB driver detection rules
+    const detectedDBDrivers = [];
+    const dbKeywords = ['pg', 'postgres', 'mysql2', 'mongodb', 'mongoose', 'redis', 'sqlite3', 'sequelize', 'prisma'];
+    for (const dep of Object.keys(allDeps)) {
+        if (dbKeywords.some(kw => dep.includes(kw))) {
+            detectedDBDrivers.push(dep);
+        }
+    }
+    return {
+        dependencies: allDeps,
+        framework,
+        detectedDBDrivers
+    };
+}
+/**
+ * Classify a file into a category based on its name and contents
+ */
+function classifyFile(relativeFilePath) {
+    const fileName = path.basename(relativeFilePath);
+    if (CANDIDATE_PATTERNS.apis.test(fileName))
+        return 'apis';
+    if (CANDIDATE_PATTERNS.data.test(fileName))
+        return 'data';
+    if (CANDIDATE_PATTERNS.architecture.test(fileName))
+        return 'architecture';
+    if (CANDIDATE_PATTERNS.operations.test(fileName))
+        return 'operations';
+    return 'general';
+}
+/**
+ * Core function to scan a codebase and return deterministic facts + candidate files
+ */
+export async function scanCodebase(repoPath) {
+    const depInfo = await extractDependencies(repoPath);
+    const allFiles = await walkDirectory(repoPath, repoPath);
+    const candidateFiles = [];
+    const configFiles = [];
+    for (const file of allFiles) {
+        const ext = path.extname(file);
+        // Focus on config, script, and markdown files
+        const relevantExtensions = ['.json', '.js', '.ts', '.jsx', '.tsx', '.yaml', '.yml', '.env', '.ini'];
+        if (!relevantExtensions.includes(ext)) {
+            continue;
+        }
+        const fullPath = path.join(repoPath, file);
+        let sizeBytes = 0;
+        try {
+            const stats = await fs.stat(fullPath);
+            sizeBytes = stats.size;
+        }
+        catch {
+            continue;
+        }
+        // Capture generic configuration files
+        if (file.endsWith('config.js') || file.endsWith('config.ts') || file.endsWith('.json') || file.endsWith('.env')) {
+            configFiles.push(file);
+        }
+        const category = classifyFile(file);
+        // Ignore general utility json/configs unless they are specific config files
+        if (category !== 'general' || file.includes('config')) {
+            candidateFiles.push({
+                filePath: file,
+                category,
+                sizeBytes
+            });
+        }
+    }
+    return {
+        facts: {
+            dependencies: depInfo.dependencies,
+            detectedDBDrivers: depInfo.detectedDBDrivers,
+            detectedRoutes: [], // Handled by LLM-assisted semantic check later
+            framework: depInfo.framework,
+            configFiles
+        },
+        candidateFiles
+    };
+}
+/**
+ * Helper tool to read file contents for semantic verification
+ */
+export async function readCandidateFile(repoPath, relativePath) {
+    const fullPath = path.join(repoPath, relativePath);
+    try {
+        // Safety check: verify path is within repoPath
+        const resolvedPath = path.resolve(fullPath);
+        const resolvedRepo = path.resolve(repoPath);
+        if (!resolvedPath.startsWith(resolvedRepo)) {
+            throw new Error('Access denied: Path is outside repository root.');
+        }
+        const content = await fs.readFile(fullPath, 'utf-8');
+        return content;
+    }
+    catch (err) {
+        return `Error reading file: ${err.message}`;
+    }
+}
