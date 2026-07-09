@@ -1,6 +1,10 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { CodebaseFacts } from '../types.js';
+
+const execAsync = promisify(exec);
 
 interface PackageJson {
   dependencies?: Record<string, string>;
@@ -231,7 +235,7 @@ export async function ingestReferenceDocument(
       };
     }
   } else {
-    // GitHub repository URL ingestion (simulated / parsed)
+    // GitHub repository URL ingestion (clones repo to temp folder and extracts README)
     if (!sourcePath.toLowerCase().includes('github.com')) {
       return {
         success: false,
@@ -244,15 +248,45 @@ export async function ingestReferenceDocument(
     // Parse GitHub repo name
     const parts = sourcePath.split('github.com/')[1]?.split('/') || [];
     const repoName = parts.slice(0, 2).join('/') || 'unknown-repo';
-    
-    return {
-      success: true,
-      title: `GitHub Repo: ${repoName}`,
-      contentSnippet: `# Simulated ingestion of GitHub Repository (${sourcePath})\n` +
-        `- Target Repo: repoName\n` +
-        `- Fetched README.md, wiki pages, and architecture logs.\n` +
-        `- Found mentions of: Koa middleware framework, MongoDB client setup, Winston logging format.\n` +
-        `- Successfully indexed 5 documentation files.`
-    };
+    const tempClonePath = path.join(repoPath, '.knowledge', 'temp_clone');
+
+    try {
+      // Clean up any existing temp clone
+      await fs.rm(tempClonePath, { recursive: true, force: true });
+      
+      // Perform shallow clone (fast, clones only HEAD)
+      await execAsync(`git clone --depth 1 "${sourcePath}" "${tempClonePath}"`);
+      
+      // Locate README.md in the cloned directory
+      const readmePath = path.join(tempClonePath, 'README.md');
+      let content = '';
+      try {
+        content = await fs.readFile(readmePath, 'utf-8');
+      } catch {
+        // If no README.md, list directory files
+        const files = await fs.readdir(tempClonePath);
+        content = `# GitHub Repository: ${repoName}\nNo README.md found. Files present:\n` + files.map(f => `- ${f}`).join('\n');
+      }
+
+      const snippet = content.length > 800 ? content.slice(0, 800) + '...' : content;
+      
+      // Clean up temp folder
+      await fs.rm(tempClonePath, { recursive: true, force: true });
+
+      return {
+        success: true,
+        title: `GitHub Repo: ${repoName}`,
+        contentSnippet: snippet
+      };
+    } catch (err: any) {
+      // Ensure temp folder is cleaned up even on failure
+      await fs.rm(tempClonePath, { recursive: true, force: true }).catch(() => {});
+      return {
+        success: false,
+        title: sourcePath,
+        contentSnippet: '',
+        error: `Could not clone and read repository: ${err.message}`
+      };
+    }
   }
 }
