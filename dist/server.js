@@ -5,6 +5,7 @@ import { scanCodebase, readCandidateFile, ingestReferenceDocument } from './scan
 import { applyResolution } from './resolution.js';
 import { validateSchemaBounds, commitKnowledgeBundle } from './finalization.js';
 import { AGENT_ONBOARDING_PROMPT, OKF_SCHEMAS, generateValidationChecklist } from './guidelines.js';
+import { loadOnboardingState, saveOnboardingState, resetOnboardingState } from './onboardingState.js';
 const server = new Server({
     name: 'ply-mcp-server',
     version: '0.1.0'
@@ -128,6 +129,71 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     },
                     required: ['repoPath', 'sourceType', 'sourcePath']
                 }
+            },
+            {
+                name: 'ply_get_onboarding_status',
+                description: 'Check the current step, instructions, and checklist prompts for the microservice onboarding pipeline.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        repoPath: {
+                            type: 'string',
+                            description: 'Absolute path to the microservice repository.'
+                        }
+                    },
+                    required: ['repoPath']
+                }
+            },
+            {
+                name: 'ply_submit_interview_answers',
+                description: 'Submit gathered human interview answers to advance the onboarding state to validation/triage.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        repoPath: {
+                            type: 'string',
+                            description: 'Absolute path to the microservice repository.'
+                        },
+                        answers: {
+                            type: 'object',
+                            description: 'The answers object containing domain rules, glossary, and SLAs.'
+                        }
+                    },
+                    required: ['repoPath', 'answers']
+                }
+            },
+            {
+                name: 'ply_advance_onboarding_step',
+                description: 'Advance the onboarding state machine to the next specified step.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        repoPath: {
+                            type: 'string',
+                            description: 'Absolute path to the microservice repository.'
+                        },
+                        nextStep: {
+                            type: 'string',
+                            enum: ['DOCUMENT_COLLECTION', 'PRE_FLIGHT_SCAN', 'INTERVIEW', 'TRIAGE', 'FINALIZATION', 'COMPLETED'],
+                            description: 'The step to advance to.'
+                        }
+                    },
+                    required: ['repoPath', 'nextStep']
+                }
+            },
+            {
+                name: 'ply_reset_onboarding',
+                description: 'Reset the onboarding state machine to the beginning.',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        repoPath: {
+                            type: 'string',
+                            description: 'Absolute path to the microservice repository.'
+                        }
+                    },
+                    required: ['repoPath']
+                }
             }
         ]
     };
@@ -228,6 +294,88 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         {
                             type: 'text',
                             text: JSON.stringify(result, null, 2)
+                        }
+                    ]
+                };
+            }
+            case 'ply_get_onboarding_status': {
+                const repoPath = String(args?.repoPath);
+                const state = await loadOnboardingState(repoPath);
+                let instructions = '';
+                let targetPrompt = '';
+                if (state.step === 'DOCUMENT_COLLECTION') {
+                    instructions = 'Prompt the user in chat: "Do you have any existing documentation (local Markdown files or GitHub repository URLs) you would like to share to seed the knowledge base?". Use the ply_ingest_reference tool to process any paths they share. Once the user states they have no more documents, call ply_advance_onboarding_step with nextStep="PRE_FLIGHT_SCAN".';
+                }
+                else if (state.step === 'PRE_FLIGHT_SCAN') {
+                    instructions = 'Call ply_scan_codebase to inspect repository framework and dependencies, and read relevant routing or data files using ply_read_file. Once done, call ply_advance_onboarding_step with nextStep="INTERVIEW".';
+                }
+                else if (state.step === 'INTERVIEW') {
+                    instructions = 'Analyze the codebase scan and files. Formulate and ask the user exactly 3 specific questions to collect business glossary terms, core domain rules, and operations SLA metrics. Wait for the user to answer in chat, then call ply_submit_interview_answers with their answers.';
+                    targetPrompt = 'Collect domain rules, business glossary mappings, and metrics prefixes.';
+                }
+                else if (state.step === 'TRIAGE') {
+                    instructions = 'Generate the stack-specific validation checklist using ply_generate_validation_checklist. Compare the interview state against the codebase facts to find discrepancies. Present the conflicts one-by-one to the user in chat and let them choose the resolution. Invoke ply_resolve_divergence for each resolved conflict. Once all conflicts are triaged, call ply_advance_onboarding_step with nextStep="FINALIZATION".';
+                }
+                else if (state.step === 'FINALIZATION') {
+                    instructions = 'Call ply_finalize_onboarding to run OKF schema checks, stage files, and commit the knowledge bundle locally to git.';
+                }
+                else {
+                    instructions = 'Onboarding complete! Report the final status to the user.';
+                }
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                step: state.step,
+                                instructions,
+                                targetPrompt,
+                                ingestedDocumentsCount: state.ingestedDocuments.length,
+                                interviewAnswersExist: !!state.interviewAnswers
+                            }, null, 2)
+                        }
+                    ]
+                };
+            }
+            case 'ply_submit_interview_answers': {
+                const repoPath = String(args?.repoPath);
+                const answers = args?.answers;
+                const state = await loadOnboardingState(repoPath);
+                state.interviewAnswers = answers;
+                state.step = 'TRIAGE';
+                await saveOnboardingState(repoPath, state);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({ success: true, message: 'Interview answers submitted. Transitioned to TRIAGE step.', nextStep: 'TRIAGE' }, null, 2)
+                        }
+                    ]
+                };
+            }
+            case 'ply_advance_onboarding_step': {
+                const repoPath = String(args?.repoPath);
+                const nextStep = String(args?.nextStep);
+                const state = await loadOnboardingState(repoPath);
+                state.step = nextStep;
+                await saveOnboardingState(repoPath, state);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({ success: true, message: `Advanced onboarding step to ${nextStep}.`, nextStep }, null, 2)
+                        }
+                    ]
+                };
+            }
+            case 'ply_reset_onboarding': {
+                const repoPath = String(args?.repoPath);
+                await resetOnboardingState(repoPath);
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({ success: true, message: 'Onboarding state reset successfully.' }, null, 2)
                         }
                     ]
                 };
