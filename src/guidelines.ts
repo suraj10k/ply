@@ -13,23 +13,23 @@ For a detailed manual on how to execute this lifecycle, please read the resource
 
 Follow this step-by-step guideline:
 
-STEP 0: DOCUMENT COLLECTION (INTERACTIVE)
-1. Ask the user in chat: "Do you have any existing documentation (local Markdown files or GitHub repository URLs) you would like to share to seed the knowledge base?"
-2. If they provide any paths or URLs, invoke the 'ply_ingest_reference' tool to process them.
-3. Show the user a summary of what was ingested, and ask if they have any more documents. Repeat until they say they have no more documents to share.
-
 STEP 1: PRE-FLIGHT SCAN (BACKGROUND)
 1. Invoke the 'ply_scan_codebase' tool to detect frameworks, dependencies, and get the list of candidate files.
 2. Read the contents of important candidate files using the 'ply_read_file' tool (e.g. read files containing routes, db connections, configuration settings).
 
-STEP 2: ADAPTIVE INTERVIEW PASS (INTERACTIVE)
+STEP 2: DOCUMENT COLLECTION (INTERACTIVE)
+1. Based on the codebase facts detected (framework, database), ask the user in chat: "Do you have any existing documentation (local Markdown files or GitHub repository URLs) you would like to share to seed the knowledge base?"
+2. If they provide any paths or URLs, invoke the 'ply_ingest_reference' tool to process them.
+3. Show the user a summary of what was ingested, and ask if they have any more documents. Repeat until they say they have no more documents to share.
+
+STEP 3: ADAPTIVE INTERVIEW PASS (INTERACTIVE)
 1. Based on the files you read and documents ingested, formulate and ask the user questions to gather missing business logic context that code cannot reveal:
    - What are the core Domain business rules/invariants?
    - What is the glossary of terms?
    - What is the service uptime SLA/operations metrics prefix?
 2. Wait for the user's answers. Do NOT generate placeholders or make up answers yourself.
 
-STEP 3 & 4: VALIDATION & INTERACTIVE TRIAGE (INTERACTIVE)
+STEP 4: VALIDATION & INTERACTIVE TRIAGE (INTERACTIVE)
 1. Call 'ply_generate_validation_checklist' to retrieve the stack-specific checklist of checks to run.
 2. Compare the user's interview answers against the codebase facts you parsed.
 3. Identify contradictions (e.g. Mismatched database drivers, path prefixes, framework versions, or missing security middleware).
@@ -111,8 +111,8 @@ This local MCP server acts as the "Hands" of the onboarding process, guiding you
 
 ## Core Lifecycle Flow
 1. **ply_get_onboarding_status**: ALWAYS call this tool first. It returns the current step, instructions, and checklist targets. You must follow the instructions returned by the status tool.
-2. **DOCUMENT_COLLECTION**: Prompt the user for Markdown files or GitHub URLs, run ply_ingest_reference, then call ply_advance_onboarding_step with nextStep='PRE_FLIGHT_SCAN'.
-3. **PRE_FLIGHT_SCAN**: Run ply_scan_codebase and read candidate files with ply_read_file. Call ply_advance_onboarding_step with nextStep='INTERVIEW'.
+2. **PRE_FLIGHT_SCAN**: Run ply_scan_codebase and read candidate files with ply_read_file. Call ply_advance_onboarding_step with nextStep='DOCUMENT_COLLECTION'.
+3. **DOCUMENT_COLLECTION**: Prompt the user for Markdown files or GitHub URLs (tailored to detected frameworks/DBs), run ply_ingest_reference, then call ply_advance_onboarding_step with nextStep='INTERVIEW'.
 4. **INTERVIEW**: Ask the user questions in chat about glossary terms, domain rules, and SLAs. Submit responses using ply_submit_interview_answers (this auto-advances the step to TRIAGE).
 5. **TRIAGE**: Generate the checklist via ply_generate_validation_checklist. Present divergences to the user one by one in chat. Resolve them using ply_resolve_divergence. Call ply_advance_onboarding_step with nextStep='FINALIZATION'.
 6. **FINALIZATION**: Call ply_finalize_onboarding to run OKF schema checks and commit the knowledge folder.`

@@ -303,11 +303,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const state = await loadOnboardingState(repoPath);
                 let instructions = '';
                 let targetPrompt = '';
-                if (state.step === 'DOCUMENT_COLLECTION') {
-                    instructions = 'Prompt the user in chat: "Do you have any existing documentation (local Markdown files or GitHub repository URLs) you would like to share to seed the knowledge base?". Use the ply_ingest_reference tool to process any paths they share. Once the user states they have no more documents, call ply_advance_onboarding_step with nextStep="PRE_FLIGHT_SCAN".';
+                if (state.step === 'PRE_FLIGHT_SCAN') {
+                    instructions = 'Call ply_scan_codebase to inspect repository framework and dependencies, and read relevant routing or data files using ply_read_file. Once done, call ply_advance_onboarding_step with nextStep="DOCUMENT_COLLECTION".';
                 }
-                else if (state.step === 'PRE_FLIGHT_SCAN') {
-                    instructions = 'Call ply_scan_codebase to inspect repository framework and dependencies, and read relevant routing or data files using ply_read_file. Once done, call ply_advance_onboarding_step with nextStep="INTERVIEW".';
+                else if (state.step === 'DOCUMENT_COLLECTION') {
+                    instructions = 'Based on the codebase facts detected (framework, database), prompt the user in chat: "Do you have any existing documentation (local Markdown files or GitHub repository URLs) you would like to share to seed the knowledge base?". Use the ply_ingest_reference tool to process any paths they share. Once the user states they have no more documents, call ply_advance_onboarding_step with nextStep="INTERVIEW".';
                 }
                 else if (state.step === 'INTERVIEW') {
                     instructions = 'Analyze the codebase scan and files. Formulate and ask the user exactly 3 specific questions to collect business glossary terms, core domain rules, and operations SLA metrics. Wait for the user to answer in chat, then call ply_submit_interview_answers with their answers.';

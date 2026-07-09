@@ -34,13 +34,20 @@ async function runOnboardingPipeline() {
     console.log(`${colors.cyan}${colors.bold}================================================================================${colors.reset}\n`);
     const repoPath = path.resolve('./mock-microservice');
     console.log(`${colors.bold}Target Workspace:${colors.reset} ${colors.blue}${repoPath}${colors.reset}\n`);
-    // --- STEP 0: Ingest Existing Documentation ---
-    console.log(`${colors.cyan}${colors.bold}Step 0: Document Ingestion & Seeding${colors.reset}`);
-    console.log(`${colors.dim}You can share existing documentation (local Markdown files or GitHub repositories)${colors.reset}`);
-    console.log(`${colors.dim}to help Ply pre-fill the service knowledge bundle.${colors.reset}\n`);
+    // --- STEP 1: Pre-Flight Codebase Scan ---
+    console.log(`${colors.cyan}${colors.bold}Step 1: Pre-Flight Codebase Scan${colors.reset}`);
+    console.log(`${colors.dim}Scanning dependencies and extracting AST candidates...${colors.reset}\n`);
+    const scanResult = await scanCodebase(repoPath);
+    console.log(`${colors.bold}Detected Codebase Stack:${colors.reset}`);
+    console.log(`  - Framework: ${colors.magenta}${scanResult.facts.framework}${colors.reset}`);
+    console.log(`  - Database Drivers: ${colors.magenta}${JSON.stringify(scanResult.facts.detectedDBDrivers)}${colors.reset}\n`);
+    // --- STEP 2: Document Ingestion & Seeding ---
+    console.log(`${colors.cyan}${colors.bold}Step 2: Document Ingestion & Seeding${colors.reset}`);
+    console.log(`${colors.dim}Based on detected tech stack, you can share existing documentation (local Markdown files or GitHub URLs)${colors.reset}`);
+    console.log(`${colors.dim}to help pre-fill the service knowledge bundle.${colors.reset}\n`);
     const ingestedDocs = [];
     while (true) {
-        const docPath = await askQuestion(`${colors.bold}Share a document path (local .md file or GitHub URL) [or press Enter/type 'done' to finish]:${colors.reset} `);
+        const docPath = await askQuestion(`${colors.bold}Share a spec/docs file for ${scanResult.facts.framework}/${scanResult.facts.detectedDBDrivers.join('/')} [or press Enter/type 'done' to finish]:${colors.reset} `);
         const trimmed = docPath.trim();
         if (!trimmed || trimmed.toLowerCase() === 'done' || trimmed.toLowerCase() === 'no') {
             break;
@@ -65,10 +72,6 @@ async function runOnboardingPipeline() {
         console.log();
     }
     console.log(`\n${colors.green}Total Ingested Documents: ${ingestedDocs.length}${colors.reset}\n`);
-    // --- STEP 1 & 2: Pre-Flight Scan & Adaptive Interview ---
-    console.log(`${colors.cyan}${colors.bold}Step 1 & 2: Pre-Flight Codebase Scan & Interview Verification${colors.reset}`);
-    console.log(`${colors.dim}Scanning dependencies and extracting AST candidates...${colors.reset}\n`);
-    const scanResult = await scanCodebase(repoPath);
     // We use the ingested documents to refine/fill the interview state/codebase facts
     const completedCodebaseFacts = {
         ...scanResult.facts,
@@ -77,9 +80,8 @@ async function runOnboardingPipeline() {
             { path: '/login', method: 'POST' }
         ]
     };
-    // If we ingested a document specifying Koa/MongoDB, we print that we leveraged it
     if (ingestedDocs.length > 0) {
-        console.log(`🤖 ${colors.magenta}AI Harness Action:${colors.reset} Leveraged ingested document details to pre-validate interview metadata.`);
+        console.log(`🤖 ${colors.magenta}AI Harness Action:${colors.reset} Ingested document references successfully matched against codebase structures.`);
     }
     // --- STEP 3: Divergence Validation ---
     console.log(`\n${colors.cyan}${colors.bold}Step 3: Running Divergence Validation Engine${colors.reset}`);

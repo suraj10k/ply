@@ -21,7 +21,7 @@ export interface OnboardingState {
 }
 
 const DEFAULT_STATE: OnboardingState = {
-  step: 'DOCUMENT_COLLECTION',
+  step: 'PRE_FLIGHT_SCAN',
   ingestedDocuments: [],
   currentDivergenceIndex: 0
 };

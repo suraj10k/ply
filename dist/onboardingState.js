@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 const DEFAULT_STATE = {
-    step: 'DOCUMENT_COLLECTION',
+    step: 'PRE_FLIGHT_SCAN',
     ingestedDocuments: [],
     currentDivergenceIndex: 0
 };
