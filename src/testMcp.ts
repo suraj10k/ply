@@ -2,14 +2,14 @@ import { spawn } from 'child_process';
 import * as path from 'path';
 
 async function verifyMcpServer() {
-  console.log('Testing MCP Server tool registration over stdio...');
+  console.log('Testing MCP Server tool, prompt, and resource registration over stdio...');
 
   const serverPath = path.resolve('./dist/server.js');
   const child = spawn('node', [serverPath]);
 
-  let stdoutData = '';
+  let stdoutBuffer = '';
   child.stdout.on('data', (data) => {
-    stdoutData += data.toString();
+    stdoutBuffer += data.toString();
   });
 
   child.stderr.on('data', (data) => {
@@ -22,37 +22,53 @@ async function verifyMcpServer() {
   // Wait for server to initialize
   await new Promise((resolve) => setTimeout(resolve, 1000));
 
-  // Construct a JSON-RPC request for ListTools
-  const listToolsRequest = {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'tools/list',
-    params: {}
-  };
-
-  // Send request followed by a newline (standard JSON-RPC framing for stdio)
-  child.stdin.write(JSON.stringify(listToolsRequest) + '\n');
-
-  // Wait for the response
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-
-  console.log('\n--- Received Response from MCP Server ---');
-  try {
-    // Parse the JSON-RPC response
-    // The server output might contain logs, so find the JSON-RPC response part
-    const lines = stdoutData.split('\n').filter(l => l.trim().startsWith('{'));
+  // Helper to send JSON-RPC and wait for a single JSON response
+  async function queryServer(method: string, params = {}): Promise<any> {
+    const request = {
+      jsonrpc: '2.0',
+      id: Math.floor(Math.random() * 1000),
+      method,
+      params
+    };
+    
+    stdoutBuffer = ''; // Clear buffer before request
+    child.stdin.write(JSON.stringify(request) + '\n');
+    
+    // Wait for the stdout response line starting with '{'
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    
+    const lines = stdoutBuffer.split('\n').filter(l => l.trim().startsWith('{'));
     if (lines.length > 0) {
-      const response = JSON.parse(lines[0]);
-      console.log('JSON-RPC Structure Validated ✔');
-      console.log('Registered Tools:');
-      response.result.tools.forEach((tool: any) => {
-        console.log(`  - ${tool.name}: ${tool.description}`);
-      });
-    } else {
-      console.log('Error: No JSON-RPC response found on stdout. Raw output:', stdoutData);
+      return JSON.parse(lines[0]);
     }
+    throw new Error(`No response received for method ${method}`);
+  }
+
+  try {
+    // 1. Verify Tools
+    const toolsRes = await queryServer('tools/list');
+    console.log('\n✔ Tools List Validated:');
+    toolsRes.result.tools.forEach((tool: any) => {
+      console.log(`  - [Tool] ${tool.name}: ${tool.description}`);
+    });
+
+    // 2. Verify Prompts
+    const promptsRes = await queryServer('prompts/list');
+    console.log('\n✔ Prompts List Validated:');
+    promptsRes.result.prompts.forEach((prompt: any) => {
+      console.log(`  - [Prompt] ${prompt.name}: ${prompt.description}`);
+    });
+
+    // 3. Verify Resources
+    const resourcesRes = await queryServer('resources/list');
+    console.log('\n✔ Resources List Validated:');
+    resourcesRes.result.resources.forEach((resource: any) => {
+      console.log(`  - [Resource] ${resource.name} (${resource.uri})`);
+    });
+
+    console.log('\nMCP Server verification completed successfully!');
   } catch (err: any) {
-    console.error('Failed to parse server response:', err.message, stdoutData);
+    console.error('MCP verification failed:', err.message);
   }
 
   // Clean up

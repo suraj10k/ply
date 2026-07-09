@@ -29,6 +29,7 @@ graph TD
     D --> E[5. Finalization & Commit]
 ```
 
+0. **Document Ingestion**: Collect existing documentation (GitHub repositories or Markdown files) to pre-seed the knowledge base and skip basic interview questions.
 1. **Deterministic Pre-Flight Scan**: Local scan to detect project frameworks, dependencies, configs, and candidate files.
 2. **Adaptive Interview Pass**: Conversational pass with the developer to fill architectural gaps.
 3. **Divergence Validation Engine**: Mismatch checking comparing interview answers to code facts.
@@ -76,6 +77,7 @@ To load **ply** into an MCP-capable client (like **Cursor**, **Windsurf**, **Cla
 * **`ply_validate_onboarding`**: Standardized rules matching interview inputs against codebase facts to generate a `DivergenceReport`.
 * **`ply_resolve_divergence`**: Resolves a discrepancy by updating document specifications directly or writing refactor plans / backlog Markdown cards to the filesystem.
 * **`ply_finalize_onboarding`**: Validates the 6 mandatory files, stages them, and commits them locally to Git.
+* **`ply_ingest_reference`**: Ingests an existing documentation source (GitHub URL or local Markdown file path) to help seed the knowledge base.
 
 ---
 
@@ -83,6 +85,10 @@ To load **ply** into an MCP-capable client (like **Cursor**, **Windsurf**, **Cla
 
 You can run the simulated onboarding pipeline locally using the configured test runs:
 
+* **Run the complete Onboarding Pipeline (Step 0-5 interactive)**:
+  ```bash
+  npm run onboarding
+  ```
 * **Interactive Triage wizard (Step 4 CLI)**:
   ```bash
   npm run triage

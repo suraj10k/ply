@@ -3,11 +3,16 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { scanCodebase, readCandidateFile } from './scanners/projectScanner.js';
+import { scanCodebase, readCandidateFile, ingestReferenceDocument } from './scanners/projectScanner.js';
 import { runValidation } from './engine.js';
 import { applyResolution } from './resolution.js';
 import { validateSchemaBounds, commitKnowledgeBundle } from './finalization.js';
+import { AGENT_ONBOARDING_PROMPT, OKF_SCHEMAS, generateValidationChecklist } from './guidelines.js';
 
 const server = new Server(
   {
@@ -16,7 +21,9 @@ const server = new Server(
   },
   {
     capabilities: {
-      tools: {}
+      tools: {},
+      prompts: {},
+      resources: {}
     }
   }
 );
@@ -58,25 +65,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'ply_validate_onboarding',
-        description: 'Run the validation engine comparing the human onboarding interview state with codebase facts to generate a Divergence Report.',
+        name: 'ply_generate_validation_checklist',
+        description: 'Generate a stack-specific validation checklist based on local codebase facts to guide the AI agent during semantic verification.',
         inputSchema: {
           type: 'object',
           properties: {
-            repoPath: {
-              type: 'string',
-              description: 'Absolute path to the microservice repository.'
-            },
-            interviewState: {
-              type: 'object',
-              description: 'The JSON state representing the human onboarding interview answers.'
-            },
             codebaseFacts: {
               type: 'object',
-              description: 'The JSON state representing extracted codebase facts (including LLM-resolved routes).'
+              description: 'The JSON state representing extracted codebase facts.'
             }
           },
-          required: ['repoPath', 'interviewState', 'codebaseFacts']
+          required: ['codebaseFacts']
         }
       },
       {
@@ -119,6 +118,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ['repoPath']
         }
+      },
+      {
+        name: 'ply_ingest_reference',
+        description: 'Ingest an existing documentation source (GitHub URL or local Markdown file path) to help seed the knowledge base.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            repoPath: {
+              type: 'string',
+              description: 'Absolute path to the microservice repository.'
+            },
+            sourceType: {
+              type: 'string',
+              enum: ['github', 'file'],
+              description: 'Type of documentation source.'
+            },
+            sourcePath: {
+              type: 'string',
+              description: 'The GitHub repository URL or absolute/relative local Markdown file path.'
+            }
+          },
+          required: ['repoPath', 'sourceType', 'sourcePath']
+        }
       }
     ]
   };
@@ -155,17 +177,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ]
         };
       }
-      case 'ply_validate_onboarding': {
-        const repoPath = String(args?.repoPath);
-        const interviewState = args?.interviewState as any;
+      case 'ply_generate_validation_checklist': {
         const codebaseFacts = args?.codebaseFacts as any;
-        
-        const report = runValidation(repoPath, interviewState, codebaseFacts);
+        const result = generateValidationChecklist(codebaseFacts);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(report, null, 2)
+              text: JSON.stringify(result, null, 2)
             }
           ]
         };
@@ -217,6 +236,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ]
         };
       }
+      case 'ply_ingest_reference': {
+        const repoPath = String(args?.repoPath);
+        const sourceType = String(args?.sourceType) as 'github' | 'file';
+        const sourcePath = String(args?.sourcePath);
+        
+        const result = await ingestReferenceDocument(repoPath, sourceType, sourcePath);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      }
       default:
         throw new Error(`Tool not found: ${name}`);
     }
@@ -231,6 +265,65 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       ]
     };
   }
+});
+
+// Define Prompts
+server.setRequestHandler(ListPromptsRequestSchema, async () => {
+  return {
+    prompts: [
+      {
+        name: 'ply_onboarding_guide',
+        description: 'Guided instructions for the AI Harness to perform Step 3 (Validation) and Step 4 (Triage) of microservice onboarding.'
+      }
+    ]
+  };
+});
+
+server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  const { name } = request.params;
+  if (name !== 'ply_onboarding_guide') {
+    throw new Error(`Prompt not found: ${name}`);
+  }
+  return {
+    messages: [
+      {
+        role: 'user',
+        content: {
+          type: 'text',
+          text: AGENT_ONBOARDING_PROMPT
+        }
+      }
+    ]
+  };
+});
+
+// Define Resources (OKF Schemas)
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  return {
+    resources: Object.entries(OKF_SCHEMAS).map(([id, schema]) => ({
+      uri: schema.uri,
+      name: schema.name,
+      description: schema.description,
+      mimeType: 'text/markdown'
+    }))
+  };
+});
+
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const { uri } = request.params;
+  const match = Object.values(OKF_SCHEMAS).find(s => s.uri === uri);
+  if (!match) {
+    throw new Error(`Resource not found: ${uri}`);
+  }
+  return {
+    contents: [
+      {
+        uri,
+        mimeType: 'text/markdown',
+        text: match.content
+      }
+    ]
+  };
 });
 
 // Start the server using stdio transport

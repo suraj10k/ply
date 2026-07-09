@@ -16,3 +16,13 @@ export declare function scanCodebase(repoPath: string): Promise<ScanResult>;
  * Helper tool to read file contents for semantic verification
  */
 export declare function readCandidateFile(repoPath: string, relativePath: string): Promise<string>;
+/**
+ * Ingests an existing document (GitHub Repository URL or local Markdown file)
+ * to help fill the knowledge bundle.
+ */
+export declare function ingestReferenceDocument(repoPath: string, sourceType: 'github' | 'file', sourcePath: string): Promise<{
+    success: boolean;
+    title: string;
+    contentSnippet: string;
+    error?: string;
+}>;
